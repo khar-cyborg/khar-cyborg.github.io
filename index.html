@@ -1,13 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kharmukilan Muthuraman — Forward Deployed Engineer</title>
   <meta name="description" content="Kharmukilan Muthuraman — Forward Deployed Engineer at Accenture with 8+ years embedded in client teams. Claude Certified Architect (Professional), Google Cloud Professional Cloud Architect and Azure AI Engineer." />
   <meta name="author" content="Kharmukilan Muthuraman" />
-  <meta name="theme-color" content="#0b0f14" media="(prefers-color-scheme: dark)" />
-  <meta name="theme-color" content="#f6f6f2" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" id="theme-color" content="#04050c" />
 
   <!-- Open Graph / social previews -->
   <meta property="og:type" content="website" />
@@ -21,15 +20,18 @@
   <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
 
-  <!-- Apply saved / system theme before paint to avoid a flash -->
+  <!-- Dark is the default; apply a saved choice before paint to avoid a flash -->
   <script>
     (function () {
       var t = null;
       try { t = localStorage.getItem("theme"); } catch (e) {}
-      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      if (t === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        document.getElementById("theme-color").setAttribute("content", "#eef1fb");
+      }
     })();
   </script>
 
@@ -50,6 +52,7 @@
   </script>
 </head>
 <body>
+  <div class="bg-fx" aria-hidden="true"><canvas id="bg-canvas"></canvas></div>
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="site-header" id="top">
@@ -77,6 +80,7 @@
         </button>
       </div>
     </nav>
+    <div class="scroll-progress" id="scroll-progress" aria-hidden="true"></div>
   </header>
 
   <main id="main">

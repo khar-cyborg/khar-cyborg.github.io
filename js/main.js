@@ -212,6 +212,8 @@
   function renderCerts(group) {
     var list = group === "all" ? certs : certs.filter(function (c) { return c.group === group; });
     $("certs-grid").innerHTML = list.map(certCard).join("");
+    // stagger the entrance animation (see .cert in styles.css)
+    Array.prototype.forEach.call($("certs-grid").children, function (el, i) { el.style.setProperty("--i", i); });
   }
   function selectFilter(btn) {
     filtersEl.querySelectorAll(".filter").forEach(function (b) {
@@ -317,11 +319,32 @@
   function syncToggleLabel() {
     $("theme-toggle").setAttribute("aria-label", currentTheme() === "dark" ? "Switch to light mode" : "Switch to dark mode");
   }
-  $("theme-toggle").addEventListener("click", function () {
+  var reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  var finePointer = !!(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
+  var onThemeChange = function () {}; // replaced by the background canvas below
+
+  $("theme-toggle").addEventListener("click", function (ev) {
     var next = currentTheme() === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem("theme", next); } catch (e) {}
-    syncToggleLabel();
+    function apply() {
+      root.setAttribute("data-theme", next);
+      var tc = $("theme-color");
+      if (tc) tc.setAttribute("content", next === "dark" ? "#04050c" : "#eef1fb");
+      try { localStorage.setItem("theme", next); } catch (e) {}
+      syncToggleLabel();
+      onThemeChange();
+    }
+    // circular wipe from the toggle button where the View Transitions API exists
+    if (!document.startViewTransition || reduceMotion) return apply();
+    var r = ev.currentTarget.getBoundingClientRect();
+    var x = r.left + r.width / 2;
+    var y = r.top + r.height / 2;
+    var radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    document.startViewTransition(apply).ready.then(function () {
+      root.animate(
+        { clipPath: ["circle(0px at " + x + "px " + y + "px)", "circle(" + radius + "px at " + x + "px " + y + "px)"] },
+        { duration: 600, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)", pseudoElement: "::view-transition-new(root)" }
+      );
+    }).catch(function () {});
   });
   syncToggleLabel();
 
@@ -346,13 +369,237 @@
     }
   });
 
-  // ── header border + scroll spy + reveal ──────────────────────
+  // ── header border, scroll progress, timelines ────────────────
   var header = document.querySelector(".site-header");
+  var progressBar = $("scroll-progress");
+  // timelines whose gradient line draws itself as the page scrolls (--p in styles.css)
+  var timelines = Array.prototype.map.call(document.querySelectorAll(".roles, .timeline"), function (el) {
+    return { el: el, roles: el.querySelectorAll(".role") };
+  });
+  var scrollQueued = false;
   function onScroll() {
-    header.classList.toggle("scrolled", window.scrollY > 8);
+    scrollQueued = false;
+    var y = window.scrollY;
+    var vh = window.innerHeight;
+    var max = document.documentElement.scrollHeight - vh;
+    header.classList.toggle("scrolled", y > 8);
+    if (progressBar) progressBar.style.transform = "scaleX(" + (max > 0 ? Math.min(y / max, 1) : 0) + ")";
+    var trigger = vh * 0.72;
+    timelines.forEach(function (t) {
+      var r = t.el.getBoundingClientRect();
+      var p = reduceMotion ? 1 : Math.max(0, Math.min((trigger - r.top) / (r.height || 1), 1));
+      t.el.style.setProperty("--p", p.toFixed(3));
+      Array.prototype.forEach.call(t.roles, function (role) {
+        role.classList.toggle("lit", reduceMotion || role.getBoundingClientRect().top < trigger);
+      });
+    });
   }
-  window.addEventListener("scroll", onScroll, { passive: true });
+  function queueScroll() {
+    if (scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(onScroll);
+  }
+  window.addEventListener("scroll", queueScroll, { passive: true });
+  window.addEventListener("resize", queueScroll);
   onScroll();
+
+  // ── hero name: one span per word for the staggered rise ──────
+  var heroName = $("hero-name");
+  var nameWords = heroName.textContent.trim().split(/\s+/);
+  heroName.innerHTML = nameWords
+    .map(function (w, i) {
+      var last = nameWords.length > 1 && i === nameWords.length - 1;
+      return '<span class="word"><span class="word-in' + (last ? " grad" : "") + '" style="--i:' + i + '">' + esc(w) + "</span></span>";
+    })
+    .join(" ");
+
+  // ── "decode" effect for section kickers ──────────────────────
+  // Screen readers get the real text; the scrambled copy is aria-hidden.
+  function scramble(el) {
+    var text = el.textContent;
+    var GLYPHS = "01<>/[]{}#*+=_";
+    var sr = document.createElement("span");
+    sr.className = "sr-only";
+    sr.textContent = text;
+    var out = document.createElement("span");
+    out.setAttribute("aria-hidden", "true");
+    el.textContent = "";
+    el.appendChild(sr);
+    el.appendChild(out);
+    var start = performance.now();
+    (function tick(now) {
+      var p = Math.min((now - start) / 750, 1);
+      var shown = Math.floor(p * text.length);
+      var s = text.slice(0, shown);
+      for (var i = shown; i < text.length; i++) {
+        s += text.charAt(i) === " " ? " " : GLYPHS.charAt((Math.random() * GLYPHS.length) | 0);
+      }
+      out.textContent = s;
+      if (p < 1) requestAnimationFrame(tick);
+      else el.textContent = text;
+    })(start);
+  }
+
+  // ── stat numbers count up ────────────────────────────────────
+  function countUp(el) {
+    var m = /^(\D*)(\d+)(.*)$/.exec(el.textContent);
+    if (!m) return;
+    var target = parseInt(m[2], 10);
+    var start = performance.now();
+    (function tick(now) {
+      var p = Math.min((now - start) / 1400, 1);
+      var eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = m[1] + Math.round(target * eased) + m[3];
+      if (p < 1) requestAnimationFrame(tick);
+    })(start);
+  }
+
+  // ── scroll reveal: mark static blocks, stagger siblings ──────
+  document
+    .querySelectorAll(".section-head, .about-body p, .stats-grid, .filters, .more-link, .cert-note, .contact-card")
+    .forEach(function (el) { el.classList.add("reveal"); });
+  document.querySelectorAll(".reveal").forEach(function (el) {
+    var sibs = Array.prototype.filter.call(el.parentElement.children, function (c) { return c.classList.contains("reveal"); });
+    el.style.setProperty("--d", Math.min(sibs.indexOf(el), 5) * 90 + "ms");
+  });
+  function onReveal(el) {
+    el.classList.add("in");
+    if (reduceMotion) return;
+    if (el.classList.contains("stats-grid")) el.querySelectorAll("dd").forEach(countUp);
+    var kicker = el.querySelector(".kicker");
+    if (kicker) scramble(kicker);
+  }
+
+  // ── pointer effects: cursor glow, 3D tilt, magnetic buttons ──
+  // Mouse/trackpad only — skipped on touch devices and for reduced motion.
+  if (finePointer && !reduceMotion) {
+    var GLOW = ".pillar, .exp-card, .project, .cert, .skill-group, .edu, .contact-card";
+    var TILT = ".pillar, .project, .skill-group";
+    document.addEventListener("pointermove", function (e) {
+      if (!e.target.closest) return;
+      var card = e.target.closest(GLOW);
+      if (card) {
+        var r = card.getBoundingClientRect();
+        var x = e.clientX - r.left;
+        var y = e.clientY - r.top;
+        card.style.setProperty("--mx", x + "px");
+        card.style.setProperty("--my", y + "px");
+        if (card.matches(TILT)) {
+          var max = r.width > 700 ? 1.5 : 4; // wide cards tilt less
+          card.style.setProperty("--ry", ((x / r.width - 0.5) * 2 * max).toFixed(2) + "deg");
+          card.style.setProperty("--rx", ((0.5 - y / r.height) * 2 * max).toFixed(2) + "deg");
+        }
+      }
+      var btn = e.target.closest(".btn");
+      if (btn) {
+        var b = btn.getBoundingClientRect();
+        btn.style.translate =
+          ((e.clientX - b.left - b.width / 2) * 0.18).toFixed(1) + "px " +
+          ((e.clientY - b.top - b.height / 2) * 0.3).toFixed(1) + "px";
+      }
+    }, { passive: true });
+    document.addEventListener("pointerout", function (e) {
+      if (!e.target.closest) return;
+      var card = e.target.closest(TILT);
+      if (card && !card.contains(e.relatedTarget)) {
+        card.style.removeProperty("--rx");
+        card.style.removeProperty("--ry");
+      }
+      var btn = e.target.closest(".btn");
+      if (btn && !btn.contains(e.relatedTarget)) btn.style.translate = "";
+    }, { passive: true });
+  }
+
+  // ── background: drifting "neural network" on a canvas ────────
+  (function () {
+    var cv = $("bg-canvas");
+    var ctx = cv && cv.getContext && cv.getContext("2d");
+    if (!ctx) return;
+    var W = 0, H = 0, pts = [], pal = [], linkAlpha = 0.3;
+    var mouse = { x: -9999, y: -9999 };
+    var LINK = 130, MOUSE_LINK = 180, running = false;
+
+    function setPalette() {
+      var dark = currentTheme() === "dark";
+      pal = dark ? ["34,227,255", "165,123,255", "255,79,163"] : ["0,120,185", "98,54,232", "200,30,114"];
+      linkAlpha = dark ? 0.32 : 0.22;
+    }
+    function resize() {
+      var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      var w = window.innerWidth, h = window.innerHeight;
+      var widthChanged = w !== W;
+      W = w; H = h;
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // only reseed when the width changes, so mobile URL-bar resizes don't reshuffle the field
+      if (widthChanged) {
+        var n = Math.min(W < 720 ? 32 : 90, Math.round((W * H) / 16000));
+        pts = [];
+        for (var i = 0; i < n; i++) {
+          var k = Math.random();
+          pts.push({
+            x: Math.random() * W, y: Math.random() * H,
+            vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+            r: 1 + Math.random() * 1.6, c: k < 0.7 ? 0 : k < 0.9 ? 1 : 2,
+          });
+        }
+      }
+    }
+    function draw(move) {
+      ctx.clearRect(0, 0, W, H);
+      var i, j, p, q, dx, dy, d;
+      for (i = 0; i < pts.length; i++) {
+        p = pts[i];
+        if (move) {
+          p.x += p.vx; p.y += p.vy;
+          if (p.x < -20) p.x = W + 20; else if (p.x > W + 20) p.x = -20;
+          if (p.y < -20) p.y = H + 20; else if (p.y > H + 20) p.y = -20;
+        }
+        for (j = i + 1; j < pts.length; j++) {
+          q = pts[j];
+          dx = p.x - q.x; dy = p.y - q.y;
+          if (dx > LINK || dx < -LINK || dy > LINK || dy < -LINK) continue;
+          d = Math.sqrt(dx * dx + dy * dy);
+          if (d > LINK) continue;
+          ctx.strokeStyle = "rgba(" + pal[p.c] + "," + ((1 - d / LINK) * linkAlpha).toFixed(3) + ")";
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+        }
+        dx = p.x - mouse.x; dy = p.y - mouse.y;
+        d = Math.sqrt(dx * dx + dy * dy);
+        if (d < MOUSE_LINK) {
+          ctx.strokeStyle = "rgba(" + pal[p.c] + "," + ((1 - d / MOUSE_LINK) * 0.7).toFixed(3) + ")";
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
+        }
+        ctx.fillStyle = "rgba(" + pal[p.c] + ",0.85)";
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.2832); ctx.fill();
+      }
+    }
+    function loop() {
+      if (!running) return;
+      draw(true);
+      requestAnimationFrame(loop);
+    }
+    function setRunning(on) {
+      on = on && !reduceMotion;
+      if (on === running) return;
+      running = on;
+      if (on) requestAnimationFrame(loop);
+    }
+
+    setPalette();
+    resize();
+    draw(false);
+    setRunning(!document.hidden);
+    window.addEventListener("resize", function () { resize(); if (!running) draw(false); });
+    document.addEventListener("visibilitychange", function () { setRunning(!document.hidden); });
+    if (finePointer) {
+      window.addEventListener("pointermove", function (e) { mouse.x = e.clientX; mouse.y = e.clientY; }, { passive: true });
+      document.documentElement.addEventListener("pointerleave", function () { mouse.x = mouse.y = -9999; });
+    }
+    onThemeChange = function () { setPalette(); if (!running) draw(false); };
+  })();
 
   if ("IntersectionObserver" in window) {
     var linkFor = {};
@@ -376,7 +623,7 @@
       function (entries) {
         entries.forEach(function (en) {
           if (en.isIntersecting) {
-            en.target.classList.add("in");
+            onReveal(en.target);
             reveal.unobserve(en.target);
           }
         });
